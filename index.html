@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cvix Vulnerability Tracker</title>
+    <!-- Use the Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card {
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900 min-h-screen flex items-center justify-center py-10 px-4">
+    <div class="container mx-auto max-w-4xl p-8 bg-white rounded-xl shadow-lg">
+        <!-- Header Section -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-red-700">CISA Vulnerability Dashboard</h1>
+            <p class="mt-2 text-lg text-gray-600">
+                A real-time list of known exploited vulnerabilities from the CISA API.
+            </p>
+        </header>
+        
+        <!-- Controls and search -->
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+            <button id="refresh-button" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-full hover:bg-blue-700 transition duration-300 transform hover:scale-105">
+                Refresh Data
+            </button>
+            <div class="relative w-full sm:w-1/2">
+                <input type="text" id="search-input" placeholder="Search by name or affected product..." class="w-full pl-10 pr-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300">
+                <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+            </div>
+        </div>
+
+        <!-- Vulnerability List -->
+        <div id="loading" class="text-center text-gray-500 text-lg mt-10 hidden">
+            Loading vulnerabilities...
+        </div>
+        <div id="error-message" class="text-center text-red-500 font-semibold mt-10 hidden">
+            Failed to load data. Please try again later.
+        </div>
+        <div id="vulnerability-list" class="grid gap-6 mt-8">
+            <!-- Vulnerability cards will be injected here by JavaScript -->
+        </div>
+    </div>
+
+    <script>
+        const vulnerabilityList = document.getElementById('vulnerability-list');
+        const loadingIndicator = document.getElementById('loading');
+        const errorMessage = document.getElementById('error-message');
+        const refreshButton = document.getElementById('refresh-button');
+        const searchInput = document.getElementById('search-input');
+
+        let allVulnerabilities = [];
+
+        async function fetchVulnerabilities() {
+            loadingIndicator.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+            vulnerabilityList.innerHTML = '';
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/vulnerabilities');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                const data = await response.json();
+                allVulnerabilities = data;
+                displayVulnerabilities(allVulnerabilities);
+            } catch (error) {
+                console.error("Error fetching vulnerabilities:", error);
+                errorMessage.classList.remove('hidden');
+                errorMessage.textContent = `Error: ${error.message}`;
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        function displayVulnerabilities(vulnerabilities) {
+            vulnerabilityList.innerHTML = '';
+            if (vulnerabilities.length === 0) {
+                vulnerabilityList.innerHTML = `<p class="text-center text-gray-500 text-lg">No vulnerabilities found.</p>`;
+                return;
+            }
+
+            vulnerabilities.forEach(vulnerability => {
+                const card = document.createElement('div');
+                card.classList.add('card', 'bg-gray-50', 'p-6', 'rounded-xl', 'border', 'border-gray-200', 'flex', 'flex-col', 'md:flex-row', 'items-start', 'md:items-center', 'justify-between', 'space-y-4', 'md:space-y-0', 'space-x-0', 'md:space-x-6');
+                
+                const content = `
+                    <div class="flex-grow">
+                        <h2 class="text-xl font-bold text-gray-800">${vulnerability.name}</h2>
+                        <p class="mt-1 text-gray-600">
+                            <span class="font-semibold">Affected:</span> ${vulnerability.affected}
+                        </p>
+                        <p class="mt-1 text-gray-600">
+                            <span class="font-semibold">Last Updated:</span> ${vulnerability.last_updated}
+                        </p>
+                    </div>
+                    <div class="flex-shrink-0 text-center md:text-right mt-4 md:mt-0">
+                        <span class="inline-block bg-red-200 text-red-800 text-sm font-semibold px-3 py-1 rounded-full">
+                            ${vulnerability.priority}
+                        </span>
+                        <p class="text-sm text-gray-500 mt-2">${vulnerability.action}</p>
+                    </div>
+                `;
+                
+                card.innerHTML = content;
+                vulnerabilityList.appendChild(card);
+            });
+        }
+
+        function handleSearch(event) {
+            const query = event.target.value.toLowerCase();
+            const filteredVulnerabilities = allVulnerabilities.filter(vuln => {
+                return vuln.name.toLowerCase().includes(query) || vuln.affected.toLowerCase().includes(query);
+            });
+            displayVulnerabilities(filteredVulnerabilities);
+        }
+
+        // Event listeners
+        refreshButton.addEventListener('click', fetchVulnerabilities);
+        searchInput.addEventListener('input', handleSearch);
+
+        // Initial data fetch
+        window.onload = fetchVulnerabilities;
+    </script>
+</body>
+</html>
