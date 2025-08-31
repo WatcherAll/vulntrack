@@ -1,36 +1,413 @@
-# This app uses CISA Api as a vulnerability tracker, so credits to them.
-# We're still improving so please be gentle and kind with us. We plan to make a server.
-import requests
-import json
-from flask import Flask, jsonify
-from flask_cors import CORS
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVix Vulnerability Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card {
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+            color: #2dd4bf;
+        }
+        .prose strong {
+            color: #d1d5db;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen flex flex-col">
 
-app = Flask(__name__)
-CORS(app)
+    <header class="bg-slate-800 text-teal-400 shadow-md p-6 flex justify-center items-center">
+        <div class="flex flex-col items-center">
+            <h1 class="text-4xl font-extrabold tracking-tight">CVix Vulnerability Tracker</h1>
+            <p class="mt-2 text-lg text-slate-400">
+                real time vulnerability list.
+            </p>
+        </div>
+    </header>
 
-CISA_API_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-
-@app.route('/api/vulnerabilities', methods=['GET'])
-def get_vulnerabilities():
-    try:
-        response = requests.get(CISA_API_URL)
-        response.raise_for_status() 
-        data = response.json()
+    <main class="flex-1 container mx-auto p-8 flex flex-col md:flex-row space-y-8 md:space-y-0 md:space-x-8">
         
-        vulnerabilities = []
-        for vulnerability in data.get('catalog', []):
-            vulnerabilities.append({
-                'name': vulnerability.get('cveID', 'N/A'),
-                'affected': vulnerability.get('vendorProject', 'N/A') + ' ' + vulnerability.get('product', 'N/A'),
-                'priority': 'Critical',
-                'action': 'Patch by: ' + vulnerability.get('dateAdded', 'N/A'),
-                'last_updated': vulnerability.get('dateAdded', 'N/A')
-            })
+        <aside class="w-full md:w-1/3 lg:w-1/4 p-6 bg-slate-800 rounded-lg shadow-lg border border-teal-500/20 h-fit">
+            <h2 class="text-2xl font-bold text-teal-400 mb-4">Top 5 Highlights</h2>
+            <ul id="sidebar-list" class="space-y-4"></ul>
+            <div id="user-id-display" class="mt-8 text-sm text-slate-400 break-all">
+                <span class="font-semibold text-teal-400">User ID:</span> 
+                <span id="user-id">Loading...</span>
+            </div>
+        </aside>
+
+        <section class="flex-1">
+            <div id="vulnerability-list-section">
+                <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                    <button id="refresh-button" class="bg-teal-600 text-white font-semibold py-2 px-6 rounded-full hover:bg-teal-700 transition duration-300 transform hover:scale-105">
+                        Refresh Data
+                    </button>
+                    <div class="relative w-full sm:w-1/2">
+                        <input type="text" id="search-input" placeholder="Search by name or affected product..." class="w-full pl-10 pr-4 py-2 rounded-full bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500 transition duration-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                </div>
+                <div id="loading" class="text-center text-slate-400 text-lg mt-10 hidden">
+                    Loading vulnerabilities...
+                </div>
+                <div id="error-message" class="text-center text-red-500 font-semibold mt-10 hidden">
+                    Failed to load data.
+                </div>
+                <div id="vulnerability-list" class="grid gap-6 mt-8"></div>
+            </div>
+
+            <div id="vulnerability-details-section" class="hidden">
+                <button id="back-button" class="text-teal-400 hover:text-teal-600 mb-4 font-semibold flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Back to List
+                </button>
+                <div id="details-content" class="bg-slate-800 p-8 rounded-lg border border-teal-500/20">
+                    <p class="text-center text-slate-400">Loading details...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const vulnerabilityListSection = document.getElementById('vulnerability-list-section');
+        const vulnerabilityDetailsSection = document.getElementById('vulnerability-details-section');
+        const vulnerabilityList = document.getElementById('vulnerability-list');
+        const sidebarList = document.getElementById('sidebar-list');
+        const loadingIndicator = document.getElementById('loading');
+        const errorMessage = document.getElementById('error-message');
+        const refreshButton = document.getElementById('refresh-button');
+        const searchInput = document.getElementById('search-input');
+        const backButton = document.getElementById('back-button');
+        const detailsContent = document.getElementById('details-content');
+        const userIdDisplay = document.getElementById('user-id');
+        
+        // This is where the API key will be automatically provided by the environment
+        // const apiKey = "";
+
+        // Global Firebase variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // This updated code provides a robust fallback if the __firebase_config variable is not available.
+        // It prevents the "projectId not provided" error by providing placeholder values.
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{"projectId": "placeholder-project", "apiKey": "placeholder-api-key"}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId;
+        let allVulnerabilities = [];
+
+        // Collection and document paths for public data
+        const VULNERABILITY_DOC_PATH = `/artifacts/${appId}/public/data/vulnerabilities`;
+
+        // Utility functions
+        function getPriorityColor(score) {
+            if (score >= 9.0) return 'bg-red-500/30 text-red-300';
+            if (score >= 7.0) return 'bg-orange-500/30 text-orange-300';
+            if (score >= 4.0) return 'bg-yellow-500/30 text-yellow-300';
+            return 'bg-slate-500/30 text-slate-300';
+        }
+
+        function getPriorityText(score) {
+            if (score >= 9.0) return 'Critical';
+            if (score >= 7.0) return 'High';
+            if (score >= 4.0) return 'Medium';
+            return 'Low';
+        }
+
+        // Display details of a single vulnerability. This function still calls the AI directly as before.
+        async function showDetails(vulnerability) {
+            vulnerabilityListSection.classList.add('hidden');
+            vulnerabilityDetailsSection.classList.remove('hidden');
+            detailsContent.innerHTML = `<p class="text-center text-slate-400">Loading detailed information from AI...</p>`;
+
+            try {
+                const userQuery = `NVD details for ${vulnerability.cveID}. Provide a detailed, technical explanation of the vulnerability in Markdown. Cover:
+                1. A brief, high-level summary of the vulnerability.
+                2. Technical details of how the vulnerability works.
+                3. The potential impact of the vulnerability.
+                4. Recommended mitigation steps.
+                `;
+
+                const systemPrompt = `You are a world-class cybersecurity analyst. Your task is to provide a concise, single-paragraph summary of the key findings from the provided information.`;
+
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    tools: [{ "google_search": {} }],
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                };
+                
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API error! Status: ${response.status}`);
+                }
+                const result = await response.json();
+                const markdownContent = result.candidates?.[0]?.content?.parts?.[0]?.text || "No detailed information available.";
+                
+                detailsContent.innerHTML = `
+                    <h3 class="text-3xl font-bold text-teal-400 mb-4">${vulnerability.name}</h3>
+                    <p class="text-slate-400 text-sm mb-2"><strong>CVE ID:</strong> ${vulnerability.cveID}</p>
+                    <p class="text-slate-400 mb-4"><strong>Affected Products:</strong> ${vulnerability.affected}</p>
+                    <div class="mb-4">
+                        <span class="inline-block ${getPriorityColor(vulnerability.cvssScore)} text-sm font-semibold px-3 py-1 rounded-full">
+                            ${getPriorityText(vulnerability.cvssScore)}
+                        </span>
+                        <span class="inline-block bg-slate-500/30 text-slate-300 text-sm font-semibold px-3 py-1 rounded-full ml-2">
+                            ${vulnerability.type}
+                        </span>
+                    </div>
+                    <hr class="border-slate-700 mb-6">
+                    <div class="prose prose-invert max-w-none text-slate-300">
+                        <pre class="bg-slate-700 p-4 rounded-md overflow-x-auto whitespace-pre-wrap"><code class="text-sm">${markdownContent}</code></pre>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error("Error fetching AI-generated details:", error);
+                
+                detailsContent.innerHTML = `
+                    <h3 class="text-3xl font-bold text-teal-400 mb-4">AI Details Unavailable</h3>
+                    <p class="text-center text-red-400 mb-6">Failed to load detailed information from the AI. Showing fallback data instead.</p>
+                    <div class="bg-slate-700 p-6 rounded-lg">
+                        <h4 class="text-xl font-semibold text-teal-400">Description:</h4>
+                        <p class="text-slate-400 mt-2">${vulnerability.description}</p>
+                        <h4 class="text-xl font-semibold text-teal-400 mt-4">Required Action:</h4>
+                        <p class="text-slate-400 mt-2">${vulnerability.requiredAction}</p>
+                    </div>
+                `;
+            }
+        }
+        
+        function createVulnerabilityCard(vulnerability) {
+            const card = document.createElement('div');
+            card.className = 'card bg-slate-800 p-6 rounded-lg border border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between space-y-4 md:space-y-0 md:space-x-6 cursor-pointer hover:bg-slate-700';
             
-        return jsonify(vulnerabilities)
+            const priorityColorClass = getPriorityColor(vulnerability.cvssScore);
+            const priorityText = getPriorityText(vulnerability.cvssScore);
+            
+            card.innerHTML = `
+                <div class="flex-grow">
+                    <h2 class="text-xl font-bold text-sky-400">${vulnerability.name}</h2>
+                    <p class="mt-1 text-slate-400">
+                        <span class="font-semibold">Affected:</span> ${vulnerability.affected}
+                    </p>
+                    <p class="mt-1 text-slate-400">
+                        <span class="font-semibold">Last Updated:</span> ${vulnerability.dateAdded}
+                    </p>
+                </div>
+                <div class="flex-shrink-0 text-center md:text-right mt-4 md:mt-0">
+                    <span class="inline-block ${priorityColorClass} text-sm font-semibold px-3 py-1 rounded-full">
+                        ${priorityText}
+                    </span>
+                    <p class="text-sm text-slate-500 mt-2">${vulnerability.cveID}</p>
+                </div>
+            `;
+            
+            card.addEventListener('click', () => showDetails(vulnerability));
+            return card;
+        }
 
-    except requests.exceptions.RequestException as e:
-        return jsonify({'error': str(e)}), 500
+        function createSidebarItem(vulnerability) {
+            const item = document.createElement('li');
+            item.className = 'p-4 bg-slate-700 rounded-lg shadow-inner border border-teal-500/20 transition-colors hover:bg-slate-600 cursor-pointer';
+
+            item.innerHTML = `
+                <h4 class="font-semibold text-lime-400">${vulnerability.name}</h4>
+                <p class="text-xs text-slate-400 mt-1">${vulnerability.cveID}</p>
+            `;
+            item.addEventListener('click', () => showDetails(vulnerability));
+            return item;
+        }
         
-if __name__ == '__main__':
-    app.run(debug=True)
+        function displayVulnerabilities(vulnerabilities) {
+            vulnerabilityList.innerHTML = '';
+            if (vulnerabilities.length === 0) {
+                vulnerabilityList.innerHTML = `<p class="text-center text-slate-400 text-lg">No vulnerabilities found.</p>`;
+                return;
+            }
+
+            // Sort vulnerabilities by CVSS score in descending order
+            vulnerabilities.sort((a, b) => b.cvssScore - a.cvssScore);
+
+            vulnerabilities.forEach(vulnerability => {
+                vulnerabilityList.appendChild(createVulnerabilityCard(vulnerability));
+            });
+        }
+
+        function handleSearch(event) {
+            const query = event.target.value.toLowerCase();
+            const filteredVulnerabilities = allVulnerabilities.filter(vuln => {
+                const name = vuln.name ? vuln.name.toLowerCase() : '';
+                const affected = vuln.affected ? vuln.affected.toLowerCase() : '';
+                const cveID = vuln.cveID ? vuln.cveID.toLowerCase() : '';
+                return name.includes(query) || affected.includes(query) || cveID.includes(query);
+            });
+            displayVulnerabilities(filteredVulnerabilities);
+        }
+
+        // Fetch data from Gemini and save to Firestore
+        async function fetchAndSaveData() {
+            loadingIndicator.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+            
+            try {
+                const userQuery = "list of 50 recent critical and high severity CVEs from the National Vulnerability Database. Provide the CVE ID, a brief name, the affected product, CVSS v3 score, and a short description.";
+                const systemPrompt = `You are a data extraction bot. Your task is to process the search results and extract a list of vulnerabilities. The output MUST be a JSON array of objects with the following schema:
+                {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "name": { "type": "STRING" },
+                            "cveID": { "type": "STRING" },
+                            "affected": { "type": "STRING" },
+                            "cvssScore": { "type": "NUMBER" },
+                            "description": { "type": "STRING" },
+                            "dateAdded": { "type": "STRING" },
+                            "type": { "type": "STRING" }
+                        },
+                        "required": ["name", "cveID", "affected", "cvssScore", "description"]
+                    }
+                }`;
+
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    tools: [{ "google_search": {} }],
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                    }
+                };
+
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API error! Status: ${response.status}`);
+                }
+                const result = await response.json();
+                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!jsonText) throw new Error("API returned no data.");
+                
+                const data = JSON.parse(jsonText);
+                
+                const vulnerabilities = data.map(v => ({
+                    ...v,
+                    dateAdded: new Date().toLocaleDateString(),
+                    type: 'Software',
+                    timestamp: Date.now()
+                }));
+
+                const docRef = doc(db, VULNERABILITY_DOC_PATH, 'publicData');
+                await setDoc(docRef, { data: JSON.stringify(vulnerabilities) }, { merge: true });
+                
+            } catch (error) {
+                console.error("Error fetching vulnerabilities:", error);
+                errorMessage.textContent = `Failed to load data. Details: ${error.message}`;
+                errorMessage.classList.remove('hidden');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+        
+        // Listen for real-time updates from Firestore
+        function listenForDataChanges() {
+            const docRef = doc(db, VULNERABILITY_DOC_PATH, 'publicData');
+            onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const docData = docSnap.data();
+                    if (docData.data) {
+                        allVulnerabilities = JSON.parse(docData.data);
+                        displayVulnerabilities(allVulnerabilities);
+                        
+                        const highlights = allVulnerabilities.slice(0, 5);
+                        sidebarList.innerHTML = '';
+                        highlights.forEach(vulnerability => {
+                            sidebarList.appendChild(createSidebarItem(vulnerability));
+                        });
+                    }
+                } else {
+                    // No data in Firestore, fetch from Gemini and save
+                    fetchAndSaveData();
+                }
+            }, (error) => {
+                console.error("Error listening to Firestore:", error);
+                errorMessage.textContent = `Real-time updates failed. Details: ${error.message}`;
+                errorMessage.classList.remove('hidden');
+                loadingIndicator.classList.add('hidden');
+            });
+        }
+
+        async function initializeAppAndAuth() {
+            try {
+                const firebaseApp = initializeApp(firebaseConfig);
+                db = getFirestore(firebaseApp);
+                auth = getAuth(firebaseApp);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                userId = auth.currentUser?.uid;
+                if (userId) {
+                    userIdDisplay.textContent = userId;
+                } else {
+                    userIdDisplay.textContent = 'Anonymous';
+                }
+
+                // Start listening for data changes after authentication
+                listenForDataChanges();
+
+            } catch (error) {
+                console.error("Firebase initialization or auth failed:", error);
+                errorMessage.textContent = `App initialization failed. Details: ${error.message}`;
+                errorMessage.classList.remove('hidden');
+            }
+        }
+
+        backButton.addEventListener('click', () => {
+            vulnerabilityDetailsSection.classList.add('hidden');
+            vulnerabilityListSection.classList.remove('hidden');
+            displayVulnerabilities(allVulnerabilities);
+        });
+
+        refreshButton.addEventListener('click', () => {
+            fetchAndSaveData();
+        });
+
+        searchInput.addEventListener('input', handleSearch);
+
+        window.onload = initializeAppAndAuth;
+    </script>
+</body>
+</html>
