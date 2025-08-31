@@ -4,36 +4,179 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CVix Vulnerability Tracker</title>
-    <!-- Use the Tailwind CSS CDN for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
         }
         .card {
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
             transition: transform 0.2s;
         }
         .card:hover {
             transform: translateY(-5px);
         }
-        .bg-gradient-header {
-            background-image: linear-gradient(to right, #6366f1, #a855f7);
-        }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col">
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
 
-    <!-- Header Section -->
-    <header class="bg-gradient-header text-white shadow-lg p-6 flex justify-center items-center rounded-b-3xl">
+    <header class="bg-zinc-800 text-cyan-400 shadow-lg p-6 flex justify-center items-center rounded-b-3xl">
         <div class="flex flex-col items-center">
             <h1 class="text-4xl font-extrabold tracking-tight">CVix Vulnerability Tracker</h1>
-            <p class="mt-2 text-lg text-gray-200">
-                A real-time list of known exploited vulnerabilities.
+            <p class="mt-2 text-lg text-gray-400">
+                real time list of known Vulnerabilities.
             </p>
         </div>
     </header>
 
+    <main class="flex-1 container mx-auto p-8 flex flex-col md:flex-row space-y-8 md:space-y-0 md:space-x-8">
+
+        <aside class="w-full md:w-1/3 lg:w-1/4 p-6 bg-zinc-800 rounded-2xl shadow-lg border border-cyan-400 h-fit">
+            <h2 class="text-2xl font-bold text-cyan-400 mb-4">Top 5 Highlights</h2>
+            <ul id="sidebar-list" class="space-y-4">
+            </ul>
+        </aside>
+
+        <section class="flex-1">
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                <button id="refresh-button" class="bg-cyan-600 text-white font-semibold py-2 px-4 rounded-full hover:bg-cyan-700 transition duration-300 transform hover:scale-105">
+                    Refresh Data
+                </button>
+                <div class="relative w-full sm:w-1/2">
+                    <input type="text" id="search-input" placeholder="Search by name or affected product..." class="w-full pl-10 pr-4 py-2 rounded-full bg-zinc-900 border border-zinc-700 text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition duration-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+            </div>
+
+            <div id="loading" class="text-center text-gray-500 text-lg mt-10 hidden">
+                Loading vulnerabilities...
+            </div>
+            <div id="error-message" class="text-center text-red-500 font-semibold mt-10 hidden">
+                Failed to load data.
+            </div>
+            <div id="vulnerability-list" class="grid gap-6 mt-8">
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const vulnerabilityList = document.getElementById('vulnerability-list');
+        const sidebarList = document.getElementById('sidebar-list');
+        const loadingIndicator = document.getElementById('loading');
+        const errorMessage = document.getElementById('error-message');
+        const refreshButton = document.getElementById('refresh-button');
+        const searchInput = document.getElementById('search-input');
+
+        let allVulnerabilities = [];
+
+        function createVulnerabilityCard(vulnerability) {
+            const card = document.createElement('div');
+            card.className = 'card bg-zinc-800 p-6 rounded-xl border border-zinc-700 flex flex-col md:flex-row items-start md:items-center justify-between space-y-4 md:space-y-0 md:space-x-6';
+            
+            card.innerHTML = `
+                <div class="flex-grow">
+                    <h2 class="text-xl font-bold text-sky-400">${vulnerability.name}</h2>
+                    <p class="mt-1 text-gray-400">
+                        <span class="font-semibold">Affected:</span> ${vulnerability.affected}
+                    </p>
+                    <p class="mt-1 text-gray-400">
+                        <span class="font-semibold">Last Updated:</span> ${vulnerability.dateAdded}
+                    </p>
+                </div>
+                <div class="flex-shrink-0 text-center md:text-right mt-4 md:mt-0">
+                    <span class="inline-block bg-red-500/30 text-red-300 text-sm font-semibold px-3 py-1 rounded-full">
+                        HIGH SEVERITY
+                    </span>
+                    <p class="text-sm text-gray-500 mt-2">${vulnerability.requiredAction}</p>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        function createSidebarItem(vulnerability) {
+            const item = document.createElement('li');
+            item.className = 'p-4 bg-zinc-700 rounded-lg shadow-inner border border-sky-400 transition-colors hover:bg-zinc-600 cursor-pointer';
+
+            item.innerHTML = `
+                <h4 class="font-semibold text-lime-400">${vulnerability.name}</h4>
+                <p class="text-xs text-gray-400 mt-1">${vulnerability.affected}</p>
+            `;
+            item.addEventListener('click', () => {
+                const messageBox = document.createElement('div');
+                messageBox.className = 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50';
+                messageBox.innerHTML = `
+                    <div class="bg-zinc-800 p-8 rounded-lg shadow-xl max-w-sm w-full text-center border-2 border-cyan-400">
+                        <h3 class="text-xl font-bold mb-4 text-cyan-400">Details</h3>
+                        <p class="text-sm text-gray-400 mb-2"><strong>Name:</strong> ${vulnerability.name}</p>
+                        <p class="text-sm text-gray-400 mb-2"><strong>Affected:</strong> ${vulnerability.affected}</p>
+                        <p class="text-sm text-gray-400 mb-4"><strong>Action:</strong> ${vulnerability.requiredAction}</p>
+                        <button class="bg-cyan-600 text-white font-semibold py-2 px-6 rounded-full hover:bg-cyan-700" onclick="this.parentElement.parentElement.remove()">Close</button>
+                    </div>
+                `;
+                document.body.appendChild(messageBox);
+            });
+            return item;
+        }
+
+        async function fetchVulnerabilities() {
+            loadingIndicator.classList.remove('hidden');
+            errorMessage.classList.add('hidden');
+            vulnerabilityList.innerHTML = '';
+            sidebarList.innerHTML = '';
+            searchInput.value = '';
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/vulnerabilities');
+                if (!response.ok) {
+                    throw new Error(response.status);
+                }
+                const data = await response.json();
+                allVulnerabilities = data;
+                
+                displayVulnerabilities(allVulnerabilities);
+                
+                const highlights = allVulnerabilities.slice(0, 5);
+                highlights.forEach(vulnerability => {
+                    sidebarList.appendChild(createSidebarItem(vulnerability));
+                });
+                
+            } catch (error) {
+                console.error("Error fetching vulnerabilities:", error);
+                errorMessage.classList.remove('hidden');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        function displayVulnerabilities(vulnerabilities) {
+            vulnerabilityList.innerHTML = '';
+            if (vulnerabilities.length === 0) {
+                vulnerabilityList.innerHTML = `<p class="text-center text-gray-500 text-lg">No vulnerabilities found.</p>`;
+                return;
+            }
+
+            vulnerabilities.forEach(vulnerability => {
+                vulnerabilityList.appendChild(createVulnerabilityCard(vulnerability));
+            });
+        }
+
+        function handleSearch(event) {
+            const query = event.target.value.toLowerCase();
+            const filteredVulnerabilities = allVulnerabilities.filter(vuln => {
+                return vuln.name.toLowerCase().includes(query) || vuln.affected.toLowerCase().includes(query);
+            });
+            displayVulnerabilities(filteredVulnerabilities);
+        }
+
+        refreshButton.addEventListener('click', fetchVulnerabilities);
+        searchInput.addEventListener('input', handleSearch);
+
+        window.onload = fetchVulnerabilities;
+    </script>
+</body>
+</html>
     <!-- Main Content -->
     <main class="flex-1 container mx-auto p-8 flex flex-col md:flex-row space-y-8 md:space-y-0 md:space-x-8">
 
